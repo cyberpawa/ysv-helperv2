@@ -10,7 +10,7 @@ Telegram Mini App із бекендом на FastAPI для оцифруванн
    - `Оригінал`: повне зображення без додаткового кропу.
    - `П-5`: стандартний шаблон.
    - `П-5 extended`: розширений шаблон.
-3. **Розпізнавання (OCR):** FastAPI передає обрізане зображення в Gemini зі структурованим JSON-виводом.
+3. **Розпізнавання :** FastAPI передає обрізане зображення в Gemini зі структурованим JSON-виводом.
 4. **Перевірка та доставка:** редагування будь-якої клітинки в UI, збереження стану а архів, генерація `.xlsx` через у пам'яті, відправка файлу в Telegram та на email через SMTP.
 
 ## Архітектура
@@ -32,7 +32,7 @@ Telegram Mini App із бекендом на FastAPI для оцифруванн
 
 ### Структура проєкту
 
-- `src/config/templates.ts`: профілі обрізки (`original`, `form_p5`, `form_p5_extended`) та мапінг кодів неявок.
+- `src/config/templates.ts`: профілі обрізки та мапінг кодів неявок.
 - `src/utils/templateDetector.ts`: алгоритм автовизначення меж таблиці та формування ROI-кропу на `<canvas>`.
 - `src/components/TimesheetTable.tsx`: інтерактивна таблиця перевірки табеля.
 - `api/index.py`: маршрути FastAPI (`/api/upload`, `/api/state`, `/api/archive/*`, `/api/generate-excel`, `/api/send-email`, `/api/telegram`).
@@ -41,8 +41,4 @@ Telegram Mini App із бекендом на FastAPI для оцифруванн
 - `api/services/template_service.py`: реєстр шаблонів на бекенді.
 - `api/services/excel_service.py`: генерація `.xlsx` через `openpyxl` у пам'яті.
 - `api/services/email_service.py`: SMTP-відправка з таймаутом та IPv4 fallback.
-- `api/bot/handlers.py`: хендлери `aiogram 3` (`/start`, `/broadcast`, `/msg`).
-- `SENDER_EMAIL`, `SENDER_PASSWORD`, `TARGET_EMAIL`, `SMTP_SERVER`, `SMTP_PORT`
-
-Для активації захищеного webhook на проді після деплою виконайте запит:
-`GET /api/setup-webhook?secret=<WEBHOOK_SECRET>`
+- `api/bot/handlers.py`: хендлери `aiogram 3`.
