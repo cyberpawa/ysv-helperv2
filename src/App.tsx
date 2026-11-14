@@ -467,6 +467,55 @@ export default function App() {
     }
   }, []);
 
+  const fitCropperCanvasAndBox = (
+    cropper: Cropper,
+    sourceWidth: number,
+    sourceHeight: number
+  ) => {
+    const containerData = cropper.getContainerData();
+    if (!containerData || sourceWidth <= 0 || sourceHeight <= 0) return;
+
+    const containerWidth = containerData.width;
+    const containerHeight = containerData.height;
+
+    cropper.setCropBoxData({
+      left: containerWidth / 2 - 10,
+      top: containerHeight / 2 - 10,
+      width: 20,
+      height: 20,
+    });
+
+    const ratio = sourceWidth / sourceHeight;
+    const containerRatio = containerWidth / containerHeight;
+
+    let canvasWidth = containerWidth;
+    let canvasHeight = containerHeight;
+    if (ratio > containerRatio) {
+      canvasWidth = containerWidth;
+      canvasHeight = containerWidth / ratio;
+    } else {
+      canvasHeight = containerHeight;
+      canvasWidth = containerHeight * ratio;
+    }
+
+    const boxLeft = (containerWidth - canvasWidth) / 2;
+    const boxTop = (containerHeight - canvasHeight) / 2;
+
+    cropper.setCanvasData({
+      left: boxLeft,
+      top: boxTop,
+      width: canvasWidth,
+      height: canvasHeight,
+    });
+
+    cropper.setCropBoxData({
+      left: boxLeft,
+      top: boxTop,
+      width: canvasWidth,
+      height: canvasHeight,
+    });
+  };
+
   const cropperRefCallback = useCallback(
     (node: HTMLImageElement | null) => {
       if (node) {
@@ -481,9 +530,9 @@ export default function App() {
             cropperInstanceRef.current = null;
           }
           cropperInstanceRef.current = new Cropper(cropperImageRef.current, {
-            aspectRatio: 1.414,
+            aspectRatio: NaN,
             viewMode: 1,
-            autoCropArea: 0.9,
+            autoCropArea: 1,
             background: false,
             responsive: true,
             restore: false,
@@ -495,54 +544,13 @@ export default function App() {
             ready() {
               const cropper = cropperInstanceRef.current;
               if (!cropper) return;
-              const containerData = cropper.getContainerData();
               const imageData = cropper.getImageData();
-              if (containerData && imageData) {
-                const containerWidth = containerData.width;
-                const containerHeight = containerData.height;
-
-                cropper.setCropBoxData({
-                  left: containerWidth / 2 - 10,
-                  top: containerHeight / 2 - 10,
-                  width: 20,
-                  height: 20,
-                });
-
-                const imgWidth = imageData.naturalWidth;
-                const imgHeight = imageData.naturalHeight;
-                const ratio = imgWidth / imgHeight;
-                const containerRatio = containerWidth / containerHeight;
-
-                let canvasWidth = containerWidth;
-                let canvasHeight = containerHeight;
-                if (ratio > containerRatio) {
-                  canvasWidth = containerWidth;
-                  canvasHeight = containerWidth / ratio;
-                } else {
-                  canvasHeight = containerHeight;
-                  canvasWidth = containerHeight * ratio;
-                }
-
-                cropper.setCanvasData({
-                  left: (containerWidth - canvasWidth) / 2,
-                  top: (containerHeight - canvasHeight) / 2,
-                  width: canvasWidth,
-                  height: canvasHeight,
-                });
-
-                let boxWidth = canvasWidth * 0.9;
-                let boxHeight = boxWidth / 1.414;
-                if (boxHeight > canvasHeight * 0.9) {
-                  boxHeight = canvasHeight * 0.9;
-                  boxWidth = boxHeight * 1.414;
-                }
-
-                cropper.setCropBoxData({
-                  left: (containerWidth - boxWidth) / 2,
-                  top: (containerHeight - boxHeight) / 2,
-                  width: boxWidth,
-                  height: boxHeight,
-                });
+              if (imageData) {
+                fitCropperCanvasAndBox(
+                  cropper,
+                  imageData.naturalWidth,
+                  imageData.naturalHeight
+                );
               }
             },
           } as any);
@@ -575,20 +583,8 @@ export default function App() {
       setIsTransitioning(true);
       cropper.rotate(90);
 
-      const containerData = cropper.getContainerData();
       const imageData = cropper.getImageData();
-
-      if (containerData && imageData) {
-        const containerWidth = containerData.width;
-        const containerHeight = containerData.height;
-
-        cropper.setCropBoxData({
-          left: containerWidth / 2 - 10,
-          top: containerHeight / 2 - 10,
-          width: 20,
-          height: 20,
-        });
-
+      if (imageData) {
         const isRotated90or270 = Math.abs(imageData.rotate % 180) === 90;
         const rotatedWidth = isRotated90or270
           ? imageData.naturalHeight
@@ -597,39 +593,7 @@ export default function App() {
           ? imageData.naturalWidth
           : imageData.naturalHeight;
 
-        const ratio = rotatedWidth / rotatedHeight;
-        const containerRatio = containerWidth / containerHeight;
-
-        let canvasWidth = containerWidth;
-        let canvasHeight = containerHeight;
-        if (ratio > containerRatio) {
-          canvasWidth = containerWidth;
-          canvasHeight = containerWidth / ratio;
-        } else {
-          canvasHeight = containerHeight;
-          canvasWidth = containerHeight * ratio;
-        }
-
-        cropper.setCanvasData({
-          left: (containerWidth - canvasWidth) / 2,
-          top: (containerHeight - canvasHeight) / 2,
-          width: canvasWidth,
-          height: canvasHeight,
-        });
-
-        let boxWidth = canvasWidth * 0.9;
-        let boxHeight = boxWidth / 1.414;
-        if (boxHeight > canvasHeight * 0.9) {
-          boxHeight = canvasHeight * 0.9;
-          boxWidth = boxHeight * 1.414;
-        }
-
-        cropper.setCropBoxData({
-          left: (containerWidth - boxWidth) / 2,
-          top: (containerHeight - boxHeight) / 2,
-          width: boxWidth,
-          height: boxHeight,
-        });
+        fitCropperCanvasAndBox(cropper, rotatedWidth, rotatedHeight);
       }
 
       setTimeout(() => {

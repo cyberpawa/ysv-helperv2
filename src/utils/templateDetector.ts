@@ -4,8 +4,9 @@ import { TemplateROICrop, TimesheetTemplateId } from "../types/timesheet";
 const ANALYSIS_WIDTH = 360;
 const ANALYSIS_HEIGHT = 254;
 const ADAPTIVE_RADIUS = 12;
-const ADAPTIVE_DELTA = 14;
+const ADAPTIVE_THRESHOLD_RATIO = 0.9;
 const MAX_OUTPUT_SIZE = 3000;
+const HORIZONTAL_BUCKETS = 10;
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
@@ -165,15 +166,16 @@ export function detectTableBoundsAndAutoCrop(
         integral[r2 + x1] +
         integral[r1 + x1];
       const localMean = sum / area;
-      if (localMean - lum[rowOff + x] > ADAPTIVE_DELTA) {
+      if (lum[rowOff + x] < localMean * ADAPTIVE_THRESHOLD_RATIO) {
         binary[rowOff + x] = 1;
       }
     }
   }
 
-  // Vertical table span [yStart, yEnd]
+  // Vertical table span [yStart, yEnd] with horizontal grid-continuity coverage
   const rxStart = Math.floor(W * 0.03);
   const rxEnd = Math.ceil(W * 0.97);
+  const rxSpan = Math.max(1, rxEnd - rxStart + 1);
   const rowScores = new Float32Array(H);
   let maxRowScore = 0;
 
@@ -182,16 +184,31 @@ export function detectTableBoundsAndAutoCrop(
     let inkPixels = 0;
     let transitions = 0;
     let prev = binary[rowOff + rxStart];
+    let bucketMask = 0;
+
     for (let x = rxStart; x <= rxEnd; x++) {
       const curr = binary[rowOff + x];
       inkPixels += curr;
+      if (curr) {
+        const bucketIdx = Math.min(
+          HORIZONTAL_BUCKETS - 1,
+          Math.floor(((x - rxStart) * HORIZONTAL_BUCKETS) / rxSpan)
+        );
+        bucketMask |= 1 << bucketIdx;
+      }
       if (curr !== prev) {
         transitions++;
       }
       prev = curr;
     }
-    const score = inkPixels + 1.5 * transitions;
-    rowScores[y] = score;
+
+    let activeBuckets = 0;
+    for (let b = 0; b < HORIZONTAL_BUCKETS; b++) {
+      if (bucketMask & (1 << b)) activeBuckets++;
+    }
+    const gridCoverageFactor =
+      activeBuckets >= 5 ? 1 + (activeBuckets - 4) * 0.2 : 0.75;
+    rowScores[y] = (inkPixels + 1.5 * transitions) * gridCoverageFactor;
   }
 
   const smoothedRows = smoothSeries(rowScores, yMin, yMax);
@@ -199,7 +216,7 @@ export function detectTableBoundsAndAutoCrop(
     if (smoothedRows[y] > maxRowScore) maxRowScore = smoothedRows[y];
   }
 
-  const rowThresh = Math.max(W * 0.08, maxRowScore * 0.22);
+  const rowThresh = Math.max(W * 0.06, maxRowScore * 0.16);
   const rowSpan = findMainTableSpan(
     smoothedRows,
     yMin,
@@ -229,8 +246,7 @@ export function detectTableBoundsAndAutoCrop(
       }
       prev = curr;
     }
-    const score = inkPixels + 1.5 * transitions;
-    colScores[x] = score;
+    colScores[x] = inkPixels + 1.5 * transitions;
   }
 
   const smoothedCols = smoothSeries(colScores, xMin, xMax);
@@ -239,7 +255,8 @@ export function detectTableBoundsAndAutoCrop(
   }
 
   const colSpanHeight = Math.max(1, yEnd - yStart + 1);
-  const colThresh = Math.max(colSpanHeight * 0.08, maxColScore * 0.20);
+  // Low threshold so empty right-hand absence columns are included in tableW
+  const colThresh = Math.max(colSpanHeight * 0.04, maxColScore * 0.06);
   const colSpan = findMainTableSpan(
     smoothedCols,
     xMin,
@@ -269,14 +286,16 @@ export function detectTableBoundsAndAutoCrop(
   const tableH = tBottom - tTop;
 
   const left = clamp01(tLeft + tableW * 0.1);
-  const top = clamp01(tTop + tableH * 0.1);
-  const width = clamp01(tableW * 0.9);
-  const height = clamp01(tableH * 0.8);
+  const top = clamp01(tTop + tableH * 0.07);
+  const bottom = clamp01(tBottom - tableH * 0.1);
+  const height = clamp01(bottom - top);
+  // Keep 0% crop on the right edge (left + width === 1.0)
+  const width = clamp01(1.0 - left);
 
   return {
     left,
     top,
-    width: Math.min(width, 1 - left),
+    width,
     height: Math.min(height, 1 - top),
   };
 }
@@ -300,10 +319,18 @@ export function cropCanvasByTemplateROI(
   cropRect: { x: number; y: number; w: number; h: number },
   roi: TemplateROICrop
 ): string {
-  const finalX = cropRect.x + cropRect.w * roi.left;
-  const finalY = cropRect.y + cropRect.h * roi.top;
-  const finalW = cropRect.w * roi.width;
-  const finalH = cropRect.h * roi.height;
+  const finalX = Math.round(cropRect.x + cropRect.w * roi.left);
+  const finalY = Math.round(cropRect.y + cropRect.h * roi.top);
+  const rightEdge = Math.min(
+    cropRect.x + cropRect.w,
+    Math.round(cropRect.x + cropRect.w * (roi.left + roi.width))
+  );
+  const bottomEdge = Math.min(
+    cropRect.y + cropRect.h,
+    Math.round(cropRect.y + cropRect.h * (roi.top + roi.height))
+  );
+  const finalW = Math.max(1, rightEdge - finalX);
+  const finalH = Math.max(1, bottomEdge - finalY);
 
   let targetW = finalW;
   let targetH = finalH;
