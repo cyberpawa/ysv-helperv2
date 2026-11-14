@@ -100,7 +100,7 @@ export function detectTableBoundsAndAutoCrop(
 ): TemplateROICrop {
   const fallbackROI: TemplateROICrop = {
     left: 0.1,
-    top: 0.1,
+    top: 0.05,
     width: 0.9,
     height: 0.8,
   };
