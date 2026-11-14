@@ -1,37 +1,24 @@
-import { ConcreteTemplateId, TimesheetTemplateProfile } from "../types/timesheet";
+import {
+  TemplateROICrop,
+  TimesheetTemplateId,
+  TimesheetTemplateOption,
+} from "../types/timesheet";
 
-export const TIMESHEET_TEMPLATES: Record<ConcreteTemplateId, TimesheetTemplateProfile> = {
-  form_p5_standard: {
-    id: "form_p5_standard",
-    name: "Типова форма № П-5 (Стандарт)",
-    shortName: "П-5 Стандарт",
-    description: "Обрізка лівої колонки ПІБ (15%), шапки організації (15%) та підписів (15%)",
-    roiCrop: { left: 0.15, top: 0.15, width: 0.85, height: 0.70 },
-    aspectRatio: 1.414,
-  },
-  form_p5_extended: {
-    id: "form_p5_extended",
-    name: "Форма № П-5 (Розширена шапка/ПІБ)",
-    shortName: "П-5 Розширена",
-    description: "Розширена шапка філії (20%) та широка колонка табельних номерів і ПІБ (22%)",
-    roiCrop: { left: 0.22, top: 0.20, width: 0.78, height: 0.68 },
-    aspectRatio: 1.414,
-  },
-  form_uz_shift: {
-    id: "form_uz_shift",
-    name: "Цехова відомість змінного графіка",
-    shortName: "Цехова",
-    description: "Скорочена шапка (10%) та вузька колонка ПІБ (12%)",
-    roiCrop: { left: 0.12, top: 0.10, width: 0.88, height: 0.80 },
-    aspectRatio: 1.414,
-  },
-};
-
-export const TEMPLATE_ORDER: ConcreteTemplateId[] = [
-  "form_p5_standard",
-  "form_p5_extended",
-  "form_uz_shift",
+export const TEMPLATE_OPTIONS: TimesheetTemplateOption[] = [
+  { id: "auto", label: "Авто" },
+  { id: "original", label: "Оригінал" },
+  { id: "form_p5", label: "П-5" },
+  { id: "form_p5_extended", label: "П-5 extended" },
 ];
+
+export const STATIC_TEMPLATE_CROPS: Record<
+  Exclude<TimesheetTemplateId, "auto">,
+  TemplateROICrop
+> = {
+  original: { left: 0, top: 0, width: 1.0, height: 1.0 },
+  form_p5: { left: 0.15, top: 0.15, width: 0.85, height: 0.70 },
+  form_p5_extended: { left: 0.10, top: 0.10, width: 0.90, height: 0.80 },
+};
 
 const ABSENCE_COLUMN_MAP: Array<{ col: number; codes: string[] }> = [
   { col: 31, codes: ["В", "Щ", "Д", "8", "9", "10"] },
@@ -51,6 +38,8 @@ export const getCodesForCol = (col: number): string[] => {
 
 export const resolveAbsenceColumn = (code: string): number => {
   const normalized = code.trim().toUpperCase();
-  const entry = ABSENCE_COLUMN_MAP.find((item) => item.codes.includes(normalized));
+  const entry = ABSENCE_COLUMN_MAP.find((item) =>
+    item.codes.includes(normalized)
+  );
   return entry ? entry.col : 39;
 };

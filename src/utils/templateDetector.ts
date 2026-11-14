@@ -1,108 +1,294 @@
-import { ConcreteTemplateId, TemplateROICrop } from "../types/timesheet";
+import { STATIC_TEMPLATE_CROPS } from "../config/templates";
+import { TemplateROICrop, TimesheetTemplateId } from "../types/timesheet";
 
-const ANALYSIS_WIDTH = 200;
-const ANALYSIS_HEIGHT = 140;
+const ANALYSIS_WIDTH = 360;
+const ANALYSIS_HEIGHT = 254;
+const ADAPTIVE_RADIUS = 12;
+const ADAPTIVE_DELTA = 14;
 const MAX_OUTPUT_SIZE = 3000;
 
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function smoothSeries(
+  values: Float32Array,
+  startIdx: number,
+  endIdx: number
+): Float32Array {
+  const out = new Float32Array(values.length);
+  for (let i = startIdx; i <= endIdx; i++) {
+    const lo = Math.max(startIdx, i - 2);
+    const hi = Math.min(endIdx, i + 2);
+    let sum = 0;
+    for (let k = lo; k <= hi; k++) {
+      sum += values[k];
+    }
+    out[i] = sum / (hi - lo + 1);
+  }
+  return out;
+}
+
+function findMainTableSpan(
+  scores: Float32Array,
+  startIdx: number,
+  endIdx: number,
+  threshold: number,
+  maxGap: number,
+  minNoiseLength: number,
+  minMainBlockLength: number
+): [number, number] | null {
+  const runs: Array<{ start: number; end: number }> = [];
+  let runStart = -1;
+
+  for (let i = startIdx; i <= endIdx; i++) {
+    if (scores[i] >= threshold) {
+      if (runStart === -1) runStart = i;
+    } else if (runStart !== -1) {
+      runs.push({ start: runStart, end: i - 1 });
+      runStart = -1;
+    }
+  }
+  if (runStart !== -1) {
+    runs.push({ start: runStart, end: endIdx });
+  }
+
+  if (runs.length === 0) return null;
+
+  const merged: Array<{ start: number; end: number }> = [{ ...runs[0] }];
+  for (let i = 1; i < runs.length; i++) {
+    const prev = merged[merged.length - 1];
+    const curr = runs[i];
+    if (curr.start - prev.end - 1 <= maxGap) {
+      prev.end = curr.end;
+    } else {
+      merged.push({ ...curr });
+    }
+  }
+
+  const hasMainBlock = merged.some(
+    (r) => r.end - r.start + 1 >= minMainBlockLength
+  );
+  const filtered = hasMainBlock
+    ? merged.filter((r) => r.end - r.start + 1 >= minNoiseLength)
+    : merged;
+
+  if (filtered.length === 0) return null;
+
+  let longest = filtered[0];
+  for (let i = 1; i < filtered.length; i++) {
+    if (filtered[i].end - filtered[i].start > longest.end - longest.start) {
+      longest = filtered[i];
+    }
+  }
+
+  if (longest.end - longest.start + 1 >= minMainBlockLength) {
+    return [longest.start, longest.end];
+  }
+
+  return [filtered[0].start, filtered[filtered.length - 1].end];
+}
+
 /**
- * Classifies the paper timesheet blank layout by analyzing vertical and horizontal
- * table separator projections on a downsampled grayscale image.
+ * Detects the actual table boundaries on a sheet using a 2D integral image for
+ * lighting-invariant adaptive thresholding and ink + edge-transition projections,
+ * then trims 10% from the top, bottom, and left of the detected table bounds.
  */
-export function detectTimesheetTemplateFromCanvas(
+export function detectTableBoundsAndAutoCrop(
   sourceCanvas: HTMLCanvasElement
-): ConcreteTemplateId {
-  if (!sourceCanvas || sourceCanvas.width === 0 || sourceCanvas.height === 0) {
-    return "form_p5_standard";
-  }
-
-  const analysisCanvas = document.createElement("canvas");
-  analysisCanvas.width = ANALYSIS_WIDTH;
-  analysisCanvas.height = ANALYSIS_HEIGHT;
-  const ctx = analysisCanvas.getContext("2d");
-  if (!ctx) {
-    return "form_p5_standard";
-  }
-
-  ctx.drawImage(sourceCanvas, 0, 0, ANALYSIS_WIDTH, ANALYSIS_HEIGHT);
-  const { data } = ctx.getImageData(0, 0, ANALYSIS_WIDTH, ANALYSIS_HEIGHT);
-
-  const luminanceAt = (x: number, y: number): number => {
-    const idx = (y * ANALYSIS_WIDTH + x) * 4;
-    return 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+): TemplateROICrop {
+  const fallbackROI: TemplateROICrop = {
+    left: 0.1,
+    top: 0.1,
+    width: 0.9,
+    height: 0.8,
   };
 
-  // Scan vertical grid separator between PII/name column and day "01" column (10%..26% width)
-  const xMin = Math.floor(ANALYSIS_WIDTH * 0.10);
-  const xMax = Math.ceil(ANALYSIS_WIDTH * 0.26);
-  const yBandStart = Math.floor(ANALYSIS_HEIGHT * 0.20);
-  const yBandEnd = Math.floor(ANALYSIS_HEIGHT * 0.85);
-  const yBandLen = Math.max(1, yBandEnd - yBandStart);
+  if (!sourceCanvas || sourceCanvas.width === 0 || sourceCanvas.height === 0) {
+    return fallbackROI;
+  }
 
-  let bestX = Math.floor(ANALYSIS_WIDTH * 0.15);
-  let bestXDarkness = -1;
-  let totalXDarkness = 0;
-  let xCount = 0;
+  const W = ANALYSIS_WIDTH;
+  const H = ANALYSIS_HEIGHT;
+  const analysisCanvas = document.createElement("canvas");
+  analysisCanvas.width = W;
+  analysisCanvas.height = H;
+  const ctx = analysisCanvas.getContext("2d");
+  if (!ctx) {
+    return fallbackROI;
+  }
 
-  for (let x = xMin; x <= xMax; x++) {
-    let darknessSum = 0;
-    for (let y = yBandStart; y < yBandEnd; y++) {
-      darknessSum += 255 - luminanceAt(x, y);
-    }
-    const avgDarkness = darknessSum / yBandLen;
-    totalXDarkness += avgDarkness;
-    xCount++;
-    if (avgDarkness > bestXDarkness) {
-      bestXDarkness = avgDarkness;
-      bestX = x;
+  ctx.drawImage(sourceCanvas, 0, 0, W, H);
+  const { data } = ctx.getImageData(0, 0, W, H);
+
+  const lum = new Uint8Array(W * H);
+  const integralStride = W + 1;
+  const integral = new Int32Array(integralStride * (H + 1));
+
+  for (let y = 0; y < H; y++) {
+    let rowSum = 0;
+    const rowOff = y * W;
+    const intRowOff = (y + 1) * integralStride;
+    const prevIntRowOff = y * integralStride;
+
+    for (let x = 0; x < W; x++) {
+      const p = (rowOff + x) * 4;
+      const gray = Math.round(
+        0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2]
+      );
+      lum[rowOff + x] = gray;
+      rowSum += gray;
+      integral[intRowOff + x + 1] = integral[prevIntRowOff + x + 1] + rowSum;
     }
   }
 
-  // Scan horizontal separator below organization header (8%..24% height)
-  const yMin = Math.floor(ANALYSIS_HEIGHT * 0.08);
-  const yMax = Math.ceil(ANALYSIS_HEIGHT * 0.24);
-  const xBandStart = Math.floor(ANALYSIS_WIDTH * 0.15);
-  const xBandEnd = Math.floor(ANALYSIS_WIDTH * 0.90);
-  const xBandLen = Math.max(1, xBandEnd - xBandStart);
+  const xMin = Math.floor(W * 0.02);
+  const xMax = Math.ceil(W * 0.98);
+  const yMin = Math.floor(H * 0.02);
+  const yMax = Math.ceil(H * 0.98);
 
-  let bestY = Math.floor(ANALYSIS_HEIGHT * 0.15);
-  let bestYDarkness = -1;
-  let totalYDarkness = 0;
-  let yCount = 0;
+  const binary = new Uint8Array(W * H);
+  for (let y = yMin; y <= yMax; y++) {
+    const y1 = Math.max(0, y - ADAPTIVE_RADIUS);
+    const y2 = Math.min(H - 1, y + ADAPTIVE_RADIUS);
+    const r1 = y1 * integralStride;
+    const r2 = (y2 + 1) * integralStride;
+    const rowOff = y * W;
+
+    for (let x = xMin; x <= xMax; x++) {
+      const x1 = Math.max(0, x - ADAPTIVE_RADIUS);
+      const x2 = Math.min(W - 1, x + ADAPTIVE_RADIUS);
+      const area = (x2 - x1 + 1) * (y2 - y1 + 1);
+      const sum =
+        integral[r2 + x2 + 1] -
+        integral[r1 + x2 + 1] -
+        integral[r2 + x1] +
+        integral[r1 + x1];
+      const localMean = sum / area;
+      if (localMean - lum[rowOff + x] > ADAPTIVE_DELTA) {
+        binary[rowOff + x] = 1;
+      }
+    }
+  }
+
+  // Vertical table span [yStart, yEnd]
+  const rxStart = Math.floor(W * 0.03);
+  const rxEnd = Math.ceil(W * 0.97);
+  const rowScores = new Float32Array(H);
+  let maxRowScore = 0;
 
   for (let y = yMin; y <= yMax; y++) {
-    let darknessSum = 0;
-    for (let x = xBandStart; x < xBandEnd; x++) {
-      darknessSum += 255 - luminanceAt(x, y);
+    const rowOff = y * W;
+    let inkPixels = 0;
+    let transitions = 0;
+    let prev = binary[rowOff + rxStart];
+    for (let x = rxStart; x <= rxEnd; x++) {
+      const curr = binary[rowOff + x];
+      inkPixels += curr;
+      if (curr !== prev) {
+        transitions++;
+      }
+      prev = curr;
     }
-    const avgDarkness = darknessSum / xBandLen;
-    totalYDarkness += avgDarkness;
-    yCount++;
-    if (avgDarkness > bestYDarkness) {
-      bestYDarkness = avgDarkness;
-      bestY = y;
+    const score = inkPixels + 1.5 * transitions;
+    rowScores[y] = score;
+  }
+
+  const smoothedRows = smoothSeries(rowScores, yMin, yMax);
+  for (let y = yMin; y <= yMax; y++) {
+    if (smoothedRows[y] > maxRowScore) maxRowScore = smoothedRows[y];
+  }
+
+  const rowThresh = Math.max(W * 0.08, maxRowScore * 0.22);
+  const rowSpan = findMainTableSpan(
+    smoothedRows,
+    yMin,
+    yMax,
+    rowThresh,
+    Math.round(H * 0.04),
+    Math.max(2, Math.round(H * 0.03)),
+    Math.round(H * 0.35)
+  );
+  if (!rowSpan) return fallbackROI;
+
+  const [yStart, yEnd] = rowSpan;
+
+  // Horizontal table span [xStart, xEnd] strictly within [yStart, yEnd]
+  const colScores = new Float32Array(W);
+  let maxColScore = 0;
+
+  for (let x = xMin; x <= xMax; x++) {
+    let inkPixels = 0;
+    let transitions = 0;
+    let prev = binary[yStart * W + x];
+    for (let y = yStart; y <= yEnd; y++) {
+      const curr = binary[y * W + x];
+      inkPixels += curr;
+      if (curr !== prev) {
+        transitions++;
+      }
+      prev = curr;
     }
+    const score = inkPixels + 1.5 * transitions;
+    colScores[x] = score;
   }
 
-  const meanXDarkness = totalXDarkness / Math.max(1, xCount);
-  const meanYDarkness = totalYDarkness / Math.max(1, yCount);
-
-  // Require a measurable contrast peak over local mean to avoid misclassifying flat/noisy frames
-  const hasClearVerticalPeak = bestXDarkness - meanXDarkness >= 4;
-  const hasClearHorizontalPeak = bestYDarkness - meanYDarkness >= 4;
-  if (!hasClearVerticalPeak || !hasClearHorizontalPeak) {
-    return "form_p5_standard";
+  const smoothedCols = smoothSeries(colScores, xMin, xMax);
+  for (let x = xMin; x <= xMax; x++) {
+    if (smoothedCols[x] > maxColScore) maxColScore = smoothedCols[x];
   }
 
-  const xRatio = bestX / ANALYSIS_WIDTH;
-  const yRatio = bestY / ANALYSIS_HEIGHT;
+  const colSpanHeight = Math.max(1, yEnd - yStart + 1);
+  const colThresh = Math.max(colSpanHeight * 0.08, maxColScore * 0.20);
+  const colSpan = findMainTableSpan(
+    smoothedCols,
+    xMin,
+    xMax,
+    colThresh,
+    Math.round(W * 0.04),
+    Math.max(2, Math.round(W * 0.02)),
+    Math.round(W * 0.45)
+  );
+  if (!colSpan) return fallbackROI;
 
-  if (xRatio >= 0.20 && yRatio >= 0.18) {
-    return "form_p5_extended";
+  const [xStart, xEnd] = colSpan;
+
+  let tLeft = xStart / W;
+  let tRight = xEnd / W;
+  let tTop = yStart / H;
+  let tBottom = yEnd / H;
+
+  if (tRight - tLeft < 0.5 || tBottom - tTop < 0.35) {
+    tLeft = 0;
+    tRight = 1;
+    tTop = 0;
+    tBottom = 1;
   }
-  if (xRatio <= 0.13 && yRatio <= 0.12) {
-    return "form_uz_shift";
+
+  const tableW = tRight - tLeft;
+  const tableH = tBottom - tTop;
+
+  const left = clamp01(tLeft + tableW * 0.1);
+  const top = clamp01(tTop + tableH * 0.1);
+  const width = clamp01(tableW * 0.9);
+  const height = clamp01(tableH * 0.8);
+
+  return {
+    left,
+    top,
+    width: Math.min(width, 1 - left),
+    height: Math.min(height, 1 - top),
+  };
+}
+
+export function resolveTemplateROICrop(
+  sourceCanvas: HTMLCanvasElement,
+  mode: TimesheetTemplateId
+): TemplateROICrop {
+  if (mode === "auto") {
+    return detectTableBoundsAndAutoCrop(sourceCanvas);
   }
-  return "form_p5_standard";
+  return STATIC_TEMPLATE_CROPS[mode];
 }
 
 /**
@@ -122,7 +308,10 @@ export function cropCanvasByTemplateROI(
   let targetW = finalW;
   let targetH = finalH;
   if (finalW > MAX_OUTPUT_SIZE || finalH > MAX_OUTPUT_SIZE) {
-    const resizeRatio = Math.min(MAX_OUTPUT_SIZE / finalW, MAX_OUTPUT_SIZE / finalH);
+    const resizeRatio = Math.min(
+      MAX_OUTPUT_SIZE / finalW,
+      MAX_OUTPUT_SIZE / finalH
+    );
     targetW = finalW * resizeRatio;
     targetH = finalH * resizeRatio;
   }

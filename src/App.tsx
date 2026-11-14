@@ -10,27 +10,21 @@ import {
   ZoomOut,
   FileText,
   Pencil,
-  ShieldCheck,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import Cropper from "cropperjs";
 
 import {
   ArchiveItem,
-  ConcreteTemplateId,
   DocumentMeta,
   EditingCellState,
   TimesheetData,
   TimesheetTemplateId,
 } from "./types/timesheet";
-import {
-  TEMPLATE_ORDER,
-  TIMESHEET_TEMPLATES,
-  getCodesForCol,
-} from "./config/templates";
+import { TEMPLATE_OPTIONS, getCodesForCol } from "./config/templates";
 import {
   cropCanvasByTemplateROI,
-  detectTimesheetTemplateFromCanvas,
+  resolveTemplateROICrop,
 } from "./utils/templateDetector";
 import { TimesheetTable } from "./components/TimesheetTable";
 import { AmbientTrainBg, TrainLoader } from "./components/AmbientTrainBg";
@@ -51,8 +45,6 @@ export default function App() {
   // Стани шаблонів табеля та обрізки PII-областей
   const [selectedTemplateMode, setSelectedTemplateMode] =
     useState<TimesheetTemplateId>("auto");
-  const [detectedTemplateId, setDetectedTemplateId] =
-    useState<ConcreteTemplateId>("form_p5_standard");
 
   // Основні стани для роботи з даними
   const [currentBase64Image, setCurrentBase64Image] = useState<string | null>(
@@ -332,21 +324,15 @@ export default function App() {
     }
   };
 
-  // Застосування визначення типу табеля та ROI-обрізки до підготовленого A4-листа
+  // Застосування визначення меж таблиці та ROI-обрізки до підготовленого A4-листа
   const applyTemplatePipeline = useCallback(
     (sheetCanvas: HTMLCanvasElement, mode: TimesheetTemplateId) => {
       sheetCanvasRef.current = sheetCanvas;
-      const resolvedId: ConcreteTemplateId =
-        mode === "auto"
-          ? detectTimesheetTemplateFromCanvas(sheetCanvas)
-          : mode;
-      setDetectedTemplateId(resolvedId);
-
-      const profile = TIMESHEET_TEMPLATES[resolvedId];
+      const roiCrop = resolveTemplateROICrop(sheetCanvas, mode);
       const croppedDataUrl = cropCanvasByTemplateROI(
         sheetCanvas,
         { x: 0, y: 0, w: sheetCanvas.width, h: sheetCanvas.height },
-        profile.roiCrop
+        roiCrop
       );
       if (croppedDataUrl) {
         setCurrentBase64Image(croppedDataUrl);
@@ -684,7 +670,7 @@ export default function App() {
         body: JSON.stringify({
           image: currentBase64Image,
           use_fallback: useFallback,
-          template_id: detectedTemplateId,
+          template_id: selectedTemplateMode,
         }),
       });
 
@@ -1115,17 +1101,6 @@ export default function App() {
     setScreen("camera");
   };
 
-  const handleUploadClick = () => {
-    triggerHaptic();
-    setIsReadOnly(false);
-    setCurrentArchiveId(null);
-    setImageSource("upload");
-    if (hiddenFileInputRef.current) {
-      hiddenFileInputRef.current.value = "";
-      hiddenFileInputRef.current.click();
-    }
-  };
-
   const handleEmailClick = () => {
     loadArchiveList("email");
   };
@@ -1134,19 +1109,9 @@ export default function App() {
     loadArchiveList("view");
   };
 
-  const activeTemplateProfile = TIMESHEET_TEMPLATES[detectedTemplateId];
-
   return (
     <div className="w-full h-full min-h-screen railway-ambient-bg flex flex-col items-center overflow-hidden relative">
       <AmbientTrainBg />
-
-      <input
-        type="file"
-        ref={hiddenFileInputRef}
-        onChange={handleFileChange}
-        accept="image/*"
-        className="hidden"
-      />
 
       {/* ЕКРАН ГОЛОВНОГО МЕНЮ */}
       <div
@@ -1184,10 +1149,23 @@ export default function App() {
           </button>
 
           <div className="grid grid-cols-2 gap-4 mt-4 select-none">
-            <button
-              onClick={handleUploadClick}
+            <label
               className="ios-frosted-glass rounded-2xl p-5 flex flex-col items-start text-left relative overflow-hidden cursor-pointer border border-white/60 ios-touchable"
             >
+              <input
+                type="file"
+                ref={hiddenFileInputRef}
+                accept="image/*"
+                onClick={(e) => {
+                  triggerHaptic();
+                  setIsReadOnly(false);
+                  setCurrentArchiveId(null);
+                  setImageSource("upload");
+                  e.currentTarget.value = "";
+                }}
+                onChange={handleFileChange}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
+              />
               <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center text-[#FF9500] mb-3">
                 <Upload className="w-5 h-5" />
               </div>
@@ -1197,7 +1175,7 @@ export default function App() {
               <p className="text-[10px] leading-tight text-gray-500 mt-1">
                 Оберіть файл з вашої фотогалереї
               </p>
-            </button>
+            </label>
 
             <button
               onClick={handleEmailClick}
@@ -1388,51 +1366,26 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-col gap-2.5 shrink-0">
-                  <div className="ios-frosted-glass rounded-2xl p-3 border border-white/60">
-                    <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#1C1C1E] mb-2">
-                      <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span className="truncate">
-                        {selectedTemplateMode === "auto"
-                          ? `Автовизначено: ${activeTemplateProfile.shortName}`
-                          : `Шаблон: ${activeTemplateProfile.shortName}`}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-wrap gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => handleTemplateModeChange("auto")}
-                        className={`px-2.5 py-1 rounded-full text-[10px] font-semibold border transition-colors ios-touchable ${
-                          selectedTemplateMode === "auto"
-                            ? "bg-[#007AFF] text-white border-[#007AFF]"
-                            : "bg-white/75 text-[#1C1C1E] border-gray-200"
-                        }`}
-                      >
-                        Авто
-                      </button>
-                      {TEMPLATE_ORDER.map((tplId) => {
-                        const tpl = TIMESHEET_TEMPLATES[tplId];
-                        const isActive = selectedTemplateMode === tplId;
+                  <div className="ios-frosted-glass rounded-2xl p-2.5 border border-white/60">
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {TEMPLATE_OPTIONS.map((opt) => {
+                        const isActive = selectedTemplateMode === opt.id;
                         return (
                           <button
-                            key={tplId}
+                            key={opt.id}
                             type="button"
-                            onClick={() => handleTemplateModeChange(tplId)}
-                            className={`px-2.5 py-1 rounded-full text-[10px] font-semibold border transition-colors ios-touchable ${
+                            onClick={() => handleTemplateModeChange(opt.id)}
+                            className={`py-2 px-2 rounded-xl text-xs font-semibold border transition-colors ios-touchable truncate ${
                               isActive
-                                ? "bg-[#007AFF] text-white border-[#007AFF]"
+                                ? "bg-[#007AFF] text-white border-[#007AFF] shadow-sm"
                                 : "bg-white/75 text-[#1C1C1E] border-gray-200"
                             }`}
                           >
-                            {tpl.shortName}
+                            {opt.label}
                           </button>
                         );
                       })}
                     </div>
-
-                    <p className="text-[10px] text-gray-500 mt-1.5 leading-snug">
-                      {activeTemplateProfile.description}
-                    </p>
                   </div>
 
                   <div className="ios-frosted-glass rounded-2xl p-3.5 flex flex-col items-center border border-white/60">

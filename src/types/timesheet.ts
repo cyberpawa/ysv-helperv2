@@ -1,10 +1,8 @@
 export type TimesheetTemplateId =
   | "auto"
-  | "form_p5_standard"
-  | "form_p5_extended"
-  | "form_uz_shift";
-
-export type ConcreteTemplateId = Exclude<TimesheetTemplateId, "auto">;
+  | "original"
+  | "form_p5"
+  | "form_p5_extended";
 
 export interface TemplateROICrop {
   left: number;
@@ -13,13 +11,9 @@ export interface TemplateROICrop {
   height: number;
 }
 
-export interface TimesheetTemplateProfile {
-  id: ConcreteTemplateId;
-  name: string;
-  shortName: string;
-  description: string;
-  roiCrop: TemplateROICrop;
-  aspectRatio: number;
+export interface TimesheetTemplateOption {
+  id: TimesheetTemplateId;
+  label: string;
 }
 
 export interface DocumentMeta {
