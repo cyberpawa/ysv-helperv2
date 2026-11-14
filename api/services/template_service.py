@@ -4,7 +4,7 @@ TIMESHEET_TEMPLATES: dict[str, dict] = {
     "auto": {
         "id": "auto",
         "name": "Авто",
-        "description": "Автоматичне визначення меж таблиці та обрізка по 10% зверху, знизу та зліва",
+        "description": "Автоматичне обрізання до верхньої та нижньої меж таблиці та 10% зліва від її краю",
         "roi_crop": {"left": 0.10, "top": 0.10, "width": 0.90, "height": 0.80},
         "employee_rows": 4,
         "excel_template": "timesheet_template.xlsx",

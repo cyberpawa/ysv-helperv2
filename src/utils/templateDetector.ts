@@ -1,10 +1,10 @@
 import { STATIC_TEMPLATE_CROPS } from "../config/templates";
 import { TemplateROICrop, TimesheetTemplateId } from "../types/timesheet";
 
-const ANALYSIS_WIDTH = 360;
-const ANALYSIS_HEIGHT = 254;
-const ADAPTIVE_RADIUS = 12;
-const ADAPTIVE_THRESHOLD_RATIO = 0.9;
+const ANALYSIS_WIDTH = 480;
+const ANALYSIS_HEIGHT = 340;
+const ADAPTIVE_RADIUS = 14;
+const ADAPTIVE_THRESHOLD_RATIO = 0.95;
 const MAX_OUTPUT_SIZE = 3000;
 const HORIZONTAL_BUCKETS = 10;
 
@@ -93,14 +93,15 @@ function findMainTableSpan(
 /**
  * Detects the actual table boundaries on a sheet using a 2D integral image for
  * lighting-invariant adaptive thresholding and ink + edge-transition projections,
- * then trims 10% from the top, bottom, and left of the detected table bounds.
+ * crops top and bottom to the detected table borders (preserving the outer grid lines),
+ * trims 10% from the left side of the table, and leaves the right edge uncropped.
  */
 export function detectTableBoundsAndAutoCrop(
   sourceCanvas: HTMLCanvasElement
 ): TemplateROICrop {
   const fallbackROI: TemplateROICrop = {
     left: 0.1,
-    top: 0.05,
+    top: 0.1,
     width: 0.9,
     height: 0.8,
   };
@@ -207,8 +208,9 @@ export function detectTableBoundsAndAutoCrop(
       if (bucketMask & (1 << b)) activeBuckets++;
     }
     const gridCoverageFactor =
-      activeBuckets >= 5 ? 1 + (activeBuckets - 4) * 0.2 : 0.75;
-    rowScores[y] = (inkPixels + 1.5 * transitions) * gridCoverageFactor;
+      activeBuckets >= 5 ? 1 + (activeBuckets - 4) * 0.25 : 0.45;
+    const cappedInk = Math.min(inkPixels, W * 0.35);
+    rowScores[y] = (cappedInk + 1.5 * transitions) * gridCoverageFactor;
   }
 
   const smoothedRows = smoothSeries(rowScores, yMin, yMax);
@@ -216,13 +218,13 @@ export function detectTableBoundsAndAutoCrop(
     if (smoothedRows[y] > maxRowScore) maxRowScore = smoothedRows[y];
   }
 
-  const rowThresh = Math.max(W * 0.06, maxRowScore * 0.16);
+  const rowThresh = Math.max(W * 0.035, maxRowScore * 0.08);
   const rowSpan = findMainTableSpan(
     smoothedRows,
     yMin,
     yMax,
     rowThresh,
-    Math.round(H * 0.04),
+    Math.round(H * 0.16),
     Math.max(2, Math.round(H * 0.03)),
     Math.round(H * 0.35)
   );
@@ -283,13 +285,14 @@ export function detectTableBoundsAndAutoCrop(
   }
 
   const tableW = tRight - tLeft;
-  const tableH = tBottom - tTop;
 
+  // Left: crop 10% inside the table from tLeft (removes the employee name/title columns)
   const left = clamp01(tLeft + tableW * 0.1);
-  const top = clamp01(tTop + tableH * 0.07);
-  const bottom = clamp01(tBottom - tableH * 0.1);
+  // Top & Bottom: crop to the detected table borders, never cutting deeper than 10% from sheet edges
+  const top = Math.min(0.1, clamp01(tTop - 0.01));
+  const bottom = Math.max(0.9, clamp01(tBottom + 0.01));
   const height = clamp01(bottom - top);
-  // Keep 0% crop on the right edge (left + width === 1.0)
+  // Right: 0% crop (left + width === 1.0)
   const width = clamp01(1.0 - left);
 
   return {

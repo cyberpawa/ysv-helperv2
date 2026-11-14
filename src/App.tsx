@@ -33,7 +33,6 @@ import { EditCellModal } from "./components/EditCellModal";
 export default function App() {
   const tg = (window as any).Telegram?.WebApp;
 
-  // Стани переключення екранів додатку
   const [screen, setScreen] = useState<
     "menu" | "camera" | "crop" | "review" | "archive"
   >("menu");
@@ -42,11 +41,9 @@ export default function App() {
   const [imageSource, setImageSource] = useState<"camera" | "upload">("camera");
   const [isReadOnly, setIsReadOnly] = useState<boolean>(false);
 
-  // Стани шаблонів табеля та обрізки PII-областей
   const [selectedTemplateMode, setSelectedTemplateMode] =
     useState<TimesheetTemplateId>("auto");
 
-  // Основні стани для роботи з даними
   const [currentBase64Image, setCurrentBase64Image] = useState<string | null>(
     null
   );
@@ -62,12 +59,10 @@ export default function App() {
   const [currentArchiveId, setCurrentArchiveId] = useState<number | null>(null);
   const [editingCell, setEditingCell] = useState<EditingCellState | null>(null);
 
-  // Стани завантаження
   const [globalLoading, setGlobalLoading] = useState<boolean>(false);
   const [globalLoadingText, setGlobalLoadingText] = useState<string>("");
   const [captureLoading, setCaptureLoading] = useState<boolean>(false);
 
-  // Елементи інтерфейсу та управління
   const [zoomScale, setZoomScale] = useState<number>(0.82);
   const [titleText, setTitleText] = useState<string>(
     "Перевірте дані (Редагування)"
@@ -77,7 +72,6 @@ export default function App() {
   const [torchOn, setTorchOn] = useState<boolean>(false);
   const [isTransitioning, setIsTransitioning] = useState<boolean>(false);
 
-  // Референси для HTML5 API (Камера, Повний лист А4, Обрізка)
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const cropperImageRef = useRef<HTMLImageElement | null>(null);
   const cropperInstanceRef = useRef<Cropper | null>(null);
@@ -85,12 +79,11 @@ export default function App() {
   const hiddenFileInputRef = useRef<HTMLInputElement | null>(null);
   const sheetCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const DEFAULT_BACKEND_URL = "/api";
   const BACKEND_URL =
-    window.location.hostname.includes("run.app") ||
-    window.location.hostname.includes("localhost")
+    window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1"
       ? ""
-      : DEFAULT_BACKEND_URL;
+      : "/api";
 
   const getAuthHeaders = (): HeadersInit => {
     const headers: { [key: string]: string } = {
@@ -102,7 +95,7 @@ export default function App() {
     return headers;
   };
 
-  // Відновлення стану при перезавантаженні (відстеження процесу ШІ)
+  // Відновлення стану обробки при перезавантаженні
   useEffect(() => {
     let pollingInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -163,7 +156,6 @@ export default function App() {
     };
   }, []);
 
-  // Базові налаштування UI від Telegram
   useEffect(() => {
     if (tg) {
       tg.expand();
@@ -175,7 +167,6 @@ export default function App() {
     }
   }, [tg]);
 
-  // Керування видимістю кнопки "Назад" у Telegram
   useEffect(() => {
     if (tg && tg.BackButton) {
       if (screen === "menu" || globalLoading) {
@@ -615,7 +606,6 @@ export default function App() {
     setSubScreen("preview");
   };
 
-  // Виклик ШІ (Gemini) для розпізнавання тексту
   const analyzeTimesheetImage = async (useFallback: boolean = false) => {
     triggerHaptic();
     if (!currentBase64Image) return;
@@ -667,7 +657,6 @@ export default function App() {
     }
   };
 
-  // Обробники редагування таблиці через React state
   const handleToggleYellow = (day: string) => {
     if (isReadOnly) return;
     setFinalParsedData((prev) => {
