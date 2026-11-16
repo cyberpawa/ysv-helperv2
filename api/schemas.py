@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class UploadRequest(BaseModel):
@@ -74,9 +74,16 @@ class StatusResponse(BaseModel):
 
 class StatePayload(BaseModel):
     chat_id: int
-    status: str
+    status: str = "idle"
     raw_json: str | None = None
     error_message: str | None = None
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _default_status(cls, value: Any) -> str:
+        if value is None:
+            return "idle"
+        return str(value)
 
 
 class StateResponse(BaseModel):
@@ -95,6 +102,13 @@ class ArchiveItemSchema(BaseModel):
     year: str = ""
     date_filled: str = ""
     created_at: str = ""
+
+    @field_validator("period_text", "year", "date_filled", "created_at", mode="before")
+    @classmethod
+    def _coerce_optional_str(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value)
 
 
 class ArchiveListResponse(BaseModel):

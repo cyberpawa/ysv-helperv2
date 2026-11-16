@@ -267,3 +267,33 @@ def test_api_setup_webhook_rejects_invalid_secret(
     resp = client.get("/api/setup-webhook", params={"secret": "invalid"})
     assert resp.status_code == 403
     assert resp.json()["status"] == "error"
+
+
+def test_api_archive_handles_null_and_int_fields_from_db(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "allow_mock_telegram", True)
+    monkeypatch.setattr(
+        "api.main.list_user_archive",
+        lambda _chat_id: [
+            {
+                "id": 10,
+                "period_text": None,
+                "year": 2026,
+                "date_filled": None,
+                "created_at": "2026-11-14T12:00:00Z",
+            }
+        ],
+    )
+    client = TestClient(app)
+    resp = client.get("/api/archive")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "success"
+    assert body["archive"][0] == {
+        "id": 10,
+        "period_text": "",
+        "year": "2026",
+        "date_filled": "",
+        "created_at": "2026-11-14T12:00:00Z",
+    }

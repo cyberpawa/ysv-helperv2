@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, status
@@ -42,6 +43,7 @@ from api.services.timesheet_service import (
 )
 
 CurrentUser = Annotated[dict, Depends(get_current_tg_user)]
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="YSV Helper API", version="1.3.0")
 
@@ -74,6 +76,19 @@ async def domain_error_handler(_request: Request, exc: DomainError) -> JSONRespo
     return JSONResponse(
         status_code=status_code,
         content={"status": error_status, "message": str(exc), "detail": str(exc)},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("Unhandled server exception: %s", exc)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "status": "error",
+            "message": f"Внутрішня помилка сервера: {exc}",
+            "detail": str(exc),
+        },
     )
 
 

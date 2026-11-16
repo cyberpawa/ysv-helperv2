@@ -923,7 +923,13 @@ export default function App() {
       const result = await res.json();
       setArchiveLoading(false);
 
-      if (result.status === "success" && result.archive.length > 0) {
+      if (result.status === "error") {
+        setArchiveList([]);
+        setArchiveMessage(
+          "Помилка при завантаженні архіву: " +
+            (result.message || result.detail || "Невідома помилка")
+        );
+      } else if (result.status === "success" && result.archive?.length > 0) {
         setArchiveList(result.archive);
         setArchiveMessage("");
       } else {
